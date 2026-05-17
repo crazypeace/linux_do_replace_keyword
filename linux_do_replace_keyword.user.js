@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         LINUX DO 占位符全自动恢复
 // @namespace    http://tampermonkey.net/
-// @version      1.0
-// @description  自动读取楼主网站并替换占位符
+// @version      1.1
+// @description  自动读取楼主网站并替换占位符，同时将「G站」替换为 https://github.com
 // @author       Antigravity
 // @match        https://linux.do/t/topic/*
 // @grant        none
@@ -13,6 +13,8 @@
     'use strict';
 
     const PLACEHOLDER = /遵守论坛准则/g;
+    const GITHUB_PLACEHOLDER = /[Gg]站/g;
+    const GITHUB_URL = 'https://github.com';
 
     let isProcessed = false;
 
@@ -71,12 +73,15 @@
             return;
         }
 
-        // 没有占位符直接跳过
-        if (!opPost.textContent.includes('遵守论坛准则')) {
-            console.log('LINUX DO 脚本：未发现占位符');
+        const hasMainPlaceholder = opPost.textContent.includes('遵守论坛准则');
+        const hasGithubPlaceholder = opPost.textContent.includes('G站') || opPost.textContent.includes('g站');
+
+        if (!hasMainPlaceholder && !hasGithubPlaceholder) {
+            console.log('LINUX DO 脚本：未发现任何占位符');
             return;
         }
 
+        // 收集所有文本节点（先收集再操作，避免 TreeWalker 在 DOM 变更时出错）
         const walker = document.createTreeWalker(
             opPost,
             NodeFilter.SHOW_TEXT,
@@ -84,23 +89,38 @@
             false
         );
 
+        const textNodes = [];
         let node;
-        let replaced = false;
-
         while ((node = walker.nextNode())) {
-            if (PLACEHOLDER.test(node.textContent)) {
-                node.textContent = node.textContent.replace(
-                    PLACEHOLDER,
-                    domain
-                );
+            textNodes.push(node);
+        }
 
-                replaced = true;
+        let replacedDomain = false;
+        let replacedGithub = false;
+
+        for (const textNode of textNodes) {
+            // 替换「遵守论坛准则」→ 楼主域名
+            if (domain && PLACEHOLDER.test(textNode.textContent)) {
+                PLACEHOLDER.lastIndex = 0;
+                textNode.textContent = textNode.textContent.replace(PLACEHOLDER, domain);
+                replacedDomain = true;
+            }
+
+            // 替换「G站」→ https://github.com（纯文本）
+            if (GITHUB_PLACEHOLDER.test(textNode.textContent)) {
+                GITHUB_PLACEHOLDER.lastIndex = 0;
+                textNode.textContent = textNode.textContent.replace(GITHUB_PLACEHOLDER, GITHUB_URL);
+                replacedGithub = true;
             }
         }
 
-        if (replaced) {
-            console.log(`LINUX DO 脚本：已替换为 ${domain}`);
-        } else {
+        if (replacedDomain) {
+            console.log(`LINUX DO 脚本：域名占位符已替换为 ${domain}`);
+        }
+        if (replacedGithub) {
+            console.log(`LINUX DO 脚本：「G站」已替换为 ${GITHUB_URL}`);
+        }
+        if (!replacedDomain && !replacedGithub) {
             console.log('LINUX DO 脚本：没有需要替换的内容');
         }
     }
@@ -117,11 +137,8 @@
             return;
         }
 
+        // 即使获取域名失败，也继续执行（G站替换不依赖域名）
         const domain = await getUserDomain(username);
-
-        if (!domain) {
-            return;
-        }
 
         applyReplacement(domain);
 
